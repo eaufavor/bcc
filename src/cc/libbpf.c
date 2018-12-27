@@ -134,6 +134,9 @@ static struct bpf_helper helpers[] = {
   {"get_numa_node_id", "4.10"},
   {"skb_change_head", "4.10"},
   {"xdp_adjust_head", "4.10"},
+  {"bpf_prog_attach", "4.10"},
+  {"bpf_prog_detach", "4.10"},
+  {"bpf_prog_detach2", "4.10"},
   {"probe_read_str", "4.11"},
   {"get_socket_cookie", "4.12"},
   {"get_socket_uid", "4.12"},
@@ -611,6 +614,43 @@ return_result:
   if (tmp_log_buf)
     free(tmp_log_buf);
   return ret;
+}
+
+int bpf_prog_attach(int prog_fd, int target_fd, enum bpf_attach_type type,
+                    unsigned int flags)
+{
+  union bpf_attr attr;
+
+  bzero(&attr, sizeof(attr));
+  attr.target_fd     = target_fd;
+  attr.attach_bpf_fd = prog_fd;
+  attr.attach_type   = type;
+  attr.attach_flags  = flags;
+
+  return syscall(__NR_bpf, BPF_PROG_ATTACH, &attr, sizeof(attr));
+}
+
+int bpf_prog_detach(int target_fd, enum bpf_attach_type type)
+{
+  union bpf_attr attr;
+
+  bzero(&attr, sizeof(attr));
+  attr.target_fd   = target_fd;
+  attr.attach_type = type;
+
+  return syscall(__NR_bpf, BPF_PROG_DETACH, &attr, sizeof(attr));
+}
+
+int bpf_prog_detach2(int prog_fd, int target_fd, enum bpf_attach_type type)
+{
+  union bpf_attr attr;
+
+  bzero(&attr, sizeof(attr));
+  attr.target_fd   = target_fd;
+  attr.attach_bpf_fd = prog_fd;
+  attr.attach_type = type;
+
+  return syscall(__NR_bpf, BPF_PROG_DETACH, &attr, sizeof(attr));
 }
 
 int bpf_open_raw_sock(const char *name)

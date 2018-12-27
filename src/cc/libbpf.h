@@ -59,6 +59,11 @@ int bpf_prog_load(enum bpf_prog_type prog_type, const char *name,
                   const char *license, unsigned kern_version,
                   int log_level, char *log_buf, unsigned log_buf_size);
 
+int bpf_prog_attach(int prog_fd, int target_fd, enum bpf_attach_type type,
+                    unsigned int flags);
+int bpf_prog_detach(int target_fd, enum bpf_attach_type type);
+int bpf_prog_detach2(int prog_fd, int target_fd, enum bpf_attach_type type);
+
 int bpf_attach_socket(int sockfd, int progfd);
 
 /* create RAW socket. If name is not NULL/a non-empty null-terminated string,
