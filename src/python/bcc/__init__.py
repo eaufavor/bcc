@@ -132,6 +132,27 @@ class PerfSWConfig:
     DUMMY = 9
     BPF_OUTPUT = 10
 
+class BpfAttachType:
+    # From bpf_attach_type in uapi/linux/bpf.h
+    CGROUP_INET_INGRESS = 0
+    CGROUP_INET_EGRESS = 1
+    CGROUP_INET_SOCK_CREATE = 2
+    CGROUP_SOCK_OPS = 3
+    SK_SKB_STREAM_PARSER = 4
+    SK_SKB_STREAM_VERDICT = 5
+    CGROUP_DEVICE = 6
+    SK_MSG_VERDICT = 7
+    CGROUP_INET4_BIND = 8
+    CGROUP_INET6_BIND = 9
+    CGROUP_INET4_CONNECT = 10
+    CGROUP_INET6_CONNECT = 11
+    CGROUP_INET4_POST_BIND = 12
+    CGROUP_INET6_POST_BIND = 13
+    CGROUP_UDP4_SENDMSG = 14
+    CGROUP_UDP6_SENDMSG = 15
+    LIRC_MODE2 = 16
+    FLOW_DISSECTOR = 17
+
 class BPF(object):
     # From bpf_prog_type in uapi/linux/bpf.h
     SOCKET_FILTER = 1
@@ -297,6 +318,7 @@ class BPF(object):
         self.raw_tracepoint_fds = {}
         self.perf_buffers = {}
         self.open_perf_events = {}
+        self.attached_cgroups = {} # name: (prog_fd, cgroup_fd)
         self.tracefile = None
         atexit.register(self.cleanup)
 
@@ -694,6 +716,44 @@ class BPF(object):
         event = _assert_is_bytes(event)
         ev_name = b"r_" + event.replace(b"+", b"_").replace(b".", b"_")
         self.detach_kprobe_event(ev_name)
+
+    @staticmethod
+    def attach_prog_to_cgroup(prog_fd, cgroup_fd, attach_type):
+        res = lib.bpf_prog_attach(prog_fd, cgroup_fd, attach_type, 0)
+        if res < 0:
+            raise Exception("Failed to attach BPF to cgroup")
+
+    @staticmethod
+    def detach_prog_from_cgroup(prog_fd, cgroup_fd, attach_type):
+        res = lib.bpf_prog_detach2(prog_fd, cgroup_fd, attach_type)
+        if res < 0:
+            raise Exception("Failed to detach BPF prog from cgroup")
+
+    @staticmethod
+    def detach_from_cgroup(cgroup_fd, attach_type):
+        res = lib.bpf_prog_detach2(cgroup_fd, attach_type)
+        if res < 0:
+            raise Exception("Failed to detach all BPF from cgroup")
+
+    def attach_sockops_to_cgroup(self, name, prog_fd, cgroup_path):
+        cgroup_fd = os.open(cgroup_path, os.O_DIRECTORY, os.O_RDONLY)
+        BPF.attach_prog_to_cgroup(prog_fd, cgroup_fd,
+                                  BpfAttachType.CGROUP_SOCK_OPS)
+        self._add_attached_fd(name, prog_fd, cgroup_fd,
+                              BpfAttachType.CGROUP_SOCK_OPS)
+
+    def _add_attached_fd(self, name, prog_fd, cgroup_fd, attach_type):
+        self.attached_cgroups[name] = (prog_fd, cgroup_fd, attach_type)
+
+    def detach_sockops_from_cgroup(self, name):
+        if name not in self.attached_cgroups:
+            raise Exception("%s is not attached top a cgroup" % name)
+        prog_fd, cgroup_fd, attach_type = self.attached_cgroups[name]
+        BPF.detach_prog_from_cgroup(prog_fd, cgroup_fd, attach_type)
+        self._del_attached_fd(name)
+
+    def _del_attached_fd(self, name):
+        del self.attached_cgroups[name]
 
     @staticmethod
     def attach_xdp(dev, fn, flags=0):
@@ -1333,6 +1393,8 @@ class BPF(object):
             self.detach_tracepoint(k)
         for k, v in list(self.raw_tracepoint_fds.items()):
             self.detach_raw_tracepoint(k)
+        for k, v in list(self.attached_cgroups.items()):
+            self.detach_sockops_from_cgroup(k)
 
         # Clean up opened perf ring buffer and perf events
         table_keys = list(self.tables.keys())
